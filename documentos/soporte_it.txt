@@ -1,0 +1,37 @@
+NUBARIA TECH S.L. - GUÍA DE SOPORTE INFORMÁTICO
+Departamento de Sistemas (IT)
+
+1. CÓMO PEDIR AYUDA
+Cualquier problema informático se comunica abriendo un ticket, a través del asistente interno o del portal de soporte.
+Para abrir un ticket hay que indicar un título corto, una descripción del problema y la prioridad.
+Solo para emergencias (caída de un sistema que afecta a clientes) se puede llamar a la extensión 2500.
+
+2. PRIORIDADES Y TIEMPOS DE RESPUESTA
+- Crítica: el problema impide trabajar a varias personas o afecta a clientes. Respuesta en menos de 2 horas.
+- Alta: impide trabajar a una persona. Respuesta en menos de 8 horas laborables.
+- Media: molesta, pero se puede seguir trabajando. Respuesta en 2 días laborables.
+- Baja: peticiones y consultas (por ejemplo, instalar un programa). Respuesta en 5 días laborables.
+Los tickets pasan por estos estados: abierto, en curso y resuelto.
+
+3. HORARIO DE SOPORTE
+El equipo de IT atiende de lunes a viernes, de 8:00 a 18:00.
+Fuera de ese horario solo se atienden los tickets de prioridad crítica.
+
+4. CONTRASEÑAS
+Las contraseñas caducan cada 90 días y deben tener al menos 12 caracteres.
+Si olvidas tu contraseña, abre un ticket o llama a la extensión 2500. IT nunca te pedirá tu contraseña por correo ni por teléfono.
+
+5. SOFTWARE
+No se puede instalar ningún programa sin permiso. Para pedir un programa, abre un ticket de prioridad baja.
+Todos los portátiles tienen instalados el paquete de ofimática, el navegador, el chat interno y la VPN.
+
+6. PÉRDIDA O ROBO DEL PORTÁTIL
+Si pierdes el portátil o te lo roban, hay que avisar a IT en un plazo máximo de 24 horas, abriendo un ticket de prioridad crítica, para bloquear el equipo a distancia.
+En caso de robo, también hay que presentar la denuncia y enviarla a IT.
+
+7. DISPOSITIVOS PERSONALES
+IT NO da soporte a ordenadores, móviles ni tablets personales.
+Se puede consultar el correo y el chat desde el móvil personal, pero sin soporte de IT.
+
+8. CONTACTO
+Correo: it@nubaria.example. Emergencias: extensión 2500.
