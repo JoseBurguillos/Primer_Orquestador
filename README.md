@@ -2,7 +2,9 @@
 
 Asistente interno para los empleados de **Nubaria Tech S.L.**, una empresa ficticia. Un **agente orquestador** recibe la pregunta del empleado, decide qué **especialistas** tienen que responderla, les pasa a cada uno su parte y junta las respuestas.
 
-Está construido con **LangGraph**. Los agentes usan **Gemini** para razonar, mientras que los embeddings se calculan en local con **Ollama**.
+Está construido con **LangGraph**. Los agentes usan **Gemini** (`gemini-3.5-flash-lite`) para razonar, mientras que los embeddings se calculan en local con **Ollama**.
+
+Tiene tres especialistas: **normativa** (RAG sobre los documentos internos), **RRHH** (vacaciones en SQLite) y **tickets** (incidencias informáticas en SQLite).
 
 ## ✨ Qué puede hacer
 
@@ -11,23 +13,27 @@ Está construido con **LangGraph**. Los agentes usan **Gemini** para razonar, mi
 | "¿Hay parking para empleados?" | 📚 Normativa | Busca en los documentos internos (RAG) |
 | "¿Cuántos días de vacaciones me quedan?" | 🌴 RRHH | Consulta la base de datos (SQLite) |
 | "Quiero vacaciones del 8 al 9 de febrero" | 🌴 RRHH | Resume las fechas, pide confirmación y guarda la solicitud |
+| "¿Cómo van mis tickets?" | 💻 Tickets | Consulta la base de datos (SQLite) |
+| "No me funciona la impresora" | 💻 Tickets | Propone el ticket con su prioridad, pide confirmación y lo abre |
 | "¿Cuántos días me quedan y con cuánta antelación tengo que pedirlas?" | 🌴 RRHH **+** 📚 Normativa | El orquestador divide la pregunta y consulta a los dos |
+| "He perdido el portátil, ¿qué tengo que hacer?" | 📚 Normativa **+** 💻 Tickets | La norma dice avisar en 24 horas, y se abre un ticket crítico |
 
 ## 🏗️ Arquitectura
 
 ```
                           ┌──→ preguntar_normativa ──→ 📚 Agente de normativa ──→ Chroma (documentos)
-Empleado ──→ 🎩 Orquestador
-                          └──→ preguntar_rrhh ──────→ 🌴 Agente de RRHH ───────→ SQLite (vacaciones)
+Empleado ──→ 🎩 Orquestador ──→ preguntar_rrhh ──────→ 🌴 Agente de RRHH ───────→ SQLite (vacaciones)
+                          └──→ preguntar_tickets ───→ 💻 Agente de tickets ────→ SQLite (tickets)
 ```
 
 Cada especialista es un grafo de LangGraph independiente. El orquestador los usa como **herramientas** (patrón *agent as tool*): para él, preguntar a otro agente es una llamada más.
 
 | Agente | Tipo | Herramientas | Memoria |
 |---|---|---|---|
-| 🎩 Orquestador | ReAct (decide a quién consultar) | `preguntar_normativa`, `preguntar_rrhh` | Sí, por empleado |
+| 🎩 Orquestador | ReAct (decide a quién consultar) | `preguntar_normativa`, `preguntar_rrhh`, `preguntar_tickets` | Sí, por empleado |
 | 📚 Normativa | RAG con búsqueda fija | (busca siempre, no decide) | No |
 | 🌴 RRHH | ReAct | `consultar_dias`, `solicitar_vacaciones` | Sí, propia |
+| 💻 Tickets | ReAct | `consultar_incidencia`, `crear_incidencia` | Sí, propia |
 
 ## 🧠 Decisiones de diseño
 
@@ -39,12 +45,16 @@ El agente de normativa empezó con la búsqueda como herramienta, y a veces el m
 
 **3. El modelo entiende; el código cuenta y valida.**
 En una solicitud de vacaciones, el modelo traduce "del 8 al 9 de febrero" a fechas `AAAA-MM-DD`. El código cuenta los días laborables, comprueba los 15 días de antelación de la normativa, que le queden días suficientes y que las fechas sean válidas. Si algo falla, **no se guarda nada**.
+En los tickets pasa lo mismo: el modelo elige la prioridad, pero el código solo acepta `critica`, `alta`, `media` o `baja`, y la fecha la pone el programa.
 
 **4. Confirmación antes de actuar (*human in the loop*).**
-El agente de RRHH resume las fechas y espera un "sí" antes de guardar la solicitud. Así, si el modelo convierte mal una fecha, el empleado lo ve antes de que se registre.
+Los agentes de RRHH y de tickets resumen lo que van a hacer y esperan un "sí" antes de guardar nada. Así, si el modelo convierte mal una fecha o elige mal la prioridad, el empleado lo ve antes de que se registre.
 
 **5. Cada agente, su propia memoria.**
-El orquestador recuerda la conversación completa (`empleado-1`) y RRHH recuerda solo la suya (`empleado-1-rrhh`). Gracias a eso, el "sí" de la confirmación llega a RRHH y RRHH sabe a qué fechas se refiere.
+El orquestador recuerda la conversación completa (`empleado-1`), y cada especialista con acciones recuerda solo la suya (`empleado-1-rrhh`, `empleado-1-tickets`). Gracias a eso, el "sí" de la confirmación llega al especialista correcto, y este sabe a qué se refiere.
+
+**6. Cada especialista, en su tema.**
+RRHH y tickets solo responden con lo que devuelven sus herramientas. Si les preguntan por una norma, contestan que no es de su área, y el orquestador se lo pregunta al especialista en normativa. Sin esta regla, el agente de RRHH llegó a inventarse una norma de antelación.
 
 ## 🔬 Lo que aprendí comparando modelos
 
@@ -59,11 +69,18 @@ Se probaron reglas en el prompt y ejemplos *few-shot*, con mejoras parciales. Al
 
 **Conclusión:** el diseño era correcto y el límite estaba en el tamaño del modelo. Aun así, las validaciones en el código se mantienen, porque ningún modelo acierta el 100 % de las veces.
 
+## 💸 Lo que aprendí de usar una API en la nube
+
+- **Un sistema multiagente multiplica las llamadas.** Una pregunta mixta gasta unas **5 llamadas** al modelo: el orquestador decide, cada especialista piensa y responde, y el orquestador junta las respuestas. Con el límite gratuito de `gemini-2.5-flash` (20 peticiones al día) solo daba para unas 4 preguntas.
+- **Los proveedores retiran modelos.** `gemini-2.5-flash-lite` dejó de estar disponible para cuentas nuevas y hubo que pasar a `gemini-3.5-flash-lite`. Como el nombre del modelo está en una sola variable, el cambio fue de una línea.
+- **Cada modelo se comporta distinto.** `gemini-3.5-flash-lite` ignora el parámetro `temperature` (así que no siempre responde igual) y devuelve el contenido como una lista de bloques: por eso se lee la respuesta con `.text` en lugar de `.content`.
+- **Una posible mejora: un modelo híbrido.** Solo el orquestador necesita un modelo grande. Los especialistas funcionaban bien con `qwen2.5:7b` en local, así que usar Gemini solo en el orquestador bajaría a 2 las llamadas a la nube por pregunta y mantendría más datos en local.
+
 ## 📁 Estructura
 
 ```
 Orquestador-Asistente-empleados/
-├── app.py              # los 3 agentes, el orquestador y el chat
+├── app.py              # los 3 especialistas, el orquestador y el chat
 ├── indexar.py          # documentos/ → Chroma (colección "normativa")
 ├── crear_db.py         # crea empresa.db con empleados, vacaciones y tickets de ejemplo
 ├── documentos/         # normativa interna de la empresa ficticia
@@ -144,11 +161,13 @@ Queda pendiente de aprobación por tu responsable.
 - **Los datos se envían a Google** para que Gemini los procese. En una empresa real, con datos de empleados de verdad, habría que valorarlo, o usar un modelo local más grande.
 - La **memoria** de las conversaciones vive en la RAM: se pierde al cerrar el programa (las solicitudes sí se guardan en SQLite).
 - La búsqueda devuelve siempre los 4 fragmentos más parecidos, aunque no todos sean relevantes.
-- Depende de un servicio externo: si se superan los límites del nivel gratuito de Gemini, hay que esperar.
+- Depende de un servicio externo: con el nivel gratuito de Gemini, el número de preguntas al día es limitado, y cuando se agota hay que esperar al día siguiente.
+- Como el modelo ignora `temperature`, la misma pregunta puede recibir respuestas algo distintas: para evaluar un fallo conviene repetir la prueba.
 
 ## 🔮 Próximos pasos
 
-- [ ] 💻 **Agente de IT**: abrir y consultar tickets (la tabla `tickets` ya existe en la base de datos)
+- [x] 💻 **Agente de tickets (IT)**: abrir y consultar incidencias
+- [ ] **Modelo híbrido**: Gemini solo en el orquestador y `qwen2.5:7b` en local para los especialistas
 - [ ] Comparar con un modelo local más grande (`qwen2.5:14b`) para no depender de la nube
 - [ ] Festivos en el cálculo de días laborables
 - [ ] Memoria persistente (checkpointer en SQLite)

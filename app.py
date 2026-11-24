@@ -16,7 +16,7 @@ from datetime import date, timedelta
 
 load_dotenv()
 
-modelo = ChatGoogleGenerativeAI(model="gemini-3.5-flash-lite", temperature=0)
+modelo = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0)
 
 embeddings = OllamaEmbeddings(model="embeddinggemma") 
 
