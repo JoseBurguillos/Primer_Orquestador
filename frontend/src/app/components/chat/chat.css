@@ -1,0 +1,95 @@
+.chat {
+  max-width: 800px;
+  height: 100vh;
+  margin: 0 auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+h1 {
+  font-size: 1.4rem;
+  color: #1f4e79;
+  margin: 0 0 12px;
+}
+
+.mensajes {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: #f5f7fa;
+  border-radius: 12px;
+}
+
+.mensaje {
+  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  line-height: 1.4;
+}
+
+.mensaje p {
+  margin: 0;
+  white-space: pre-wrap;   
+}
+
+.empleado {
+  align-self: flex-end;
+  background: #1f4e79;
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.asistente {
+  align-self: flex-start;
+  background: white;
+  color: #222;
+  border: 1px solid #dde3ea;
+  border-bottom-left-radius: 4px;
+}
+
+.especialistas {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: #777;
+}
+
+.pensando {
+  font-style: italic;
+  color: #777;
+}
+
+.entrada {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.entrada input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid #ccd5df;
+  border-radius: 20px;
+  font-size: 1rem;
+}
+
+.entrada button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 20px;
+  background: #1f4e79;
+  color: white;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.entrada button:disabled {
+  background: #9bb0c4;
+  cursor: not-allowed;
+}

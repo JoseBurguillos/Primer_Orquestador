@@ -2,7 +2,9 @@
 
 Asistente interno para los empleados de **Nubaria Tech S.L.**, una empresa ficticia. Un **agente orquestador** recibe la pregunta del empleado, decide qué **especialistas** tienen que responderla, les pasa a cada uno su parte y junta las respuestas.
 
-Está construido con **LangGraph**. Los agentes usan **Gemini** (`gemini-3.5-flash-lite`) para razonar, mientras que los embeddings se calculan en local con **Ollama**.
+Está construido con **LangGraph** y usa un **modelo híbrido**: el orquestador, que hace la parte más difícil, usa **Gemini** (`gemini-3.5-flash-lite`), y los especialistas y los embeddings funcionan en local con **Ollama** (`qwen2.5:7b` y `embeddinggemma`).
+
+Se puede usar desde la terminal o desde una **web en Angular**, conectada al orquestador mediante una **API con FastAPI**, y todo se arranca con **Docker Compose**.
 
 Tiene tres especialistas: **normativa** (RAG sobre los documentos internos), **RRHH** (vacaciones en SQLite) y **tickets** (incidencias informáticas en SQLite).
 
@@ -25,6 +27,15 @@ Tiene tres especialistas: **normativa** (RAG sobre los documentos internos), **R
 Empleado ──→ 🎩 Orquestador ──→ preguntar_rrhh ──────→ 🌴 Agente de RRHH ───────→ SQLite (vacaciones)
                           └──→ preguntar_tickets ───→ 💻 Agente de tickets ────→ SQLite (tickets)
 ```
+
+Y así llega una pregunta desde la web:
+
+```
+Navegador (Angular) ──POST /chat──→ api.py (FastAPI) ──→ 🎩 orquestador ──→ especialistas
+                    ←── respuesta + especialistas consultados ──
+```
+
+La web muestra debajo de cada respuesta a qué especialistas ha consultado el orquestador.
 
 Cada especialista es un grafo de LangGraph independiente. El orquestador los usa como **herramientas** (patrón *agent as tool*): para él, preguntar a otro agente es una llamada más.
 
@@ -74,21 +85,24 @@ Se probaron reglas en el prompt y ejemplos *few-shot*, con mejoras parciales. Al
 - **Un sistema multiagente multiplica las llamadas.** Una pregunta mixta gasta unas **5 llamadas** al modelo: el orquestador decide, cada especialista piensa y responde, y el orquestador junta las respuestas. Con el límite gratuito de `gemini-2.5-flash` (20 peticiones al día) solo daba para unas 4 preguntas.
 - **Los proveedores retiran modelos.** `gemini-2.5-flash-lite` dejó de estar disponible para cuentas nuevas y hubo que pasar a `gemini-3.5-flash-lite`. Como el nombre del modelo está en una sola variable, el cambio fue de una línea.
 - **Cada modelo se comporta distinto.** `gemini-3.5-flash-lite` ignora el parámetro `temperature` (así que no siempre responde igual) y devuelve el contenido como una lista de bloques: por eso se lee la respuesta con `.text` en lugar de `.content`.
-- **Una posible mejora: un modelo híbrido.** Solo el orquestador necesita un modelo grande. Los especialistas funcionaban bien con `qwen2.5:7b` en local, así que usar Gemini solo en el orquestador bajaría a 2 las llamadas a la nube por pregunta y mantendría más datos en local.
+- **La solución: un modelo híbrido.** Solo el orquestador necesita un modelo grande. Los especialistas funcionan bien con `qwen2.5:7b` en local, así que Gemini solo se usa en el orquestador: las llamadas a la nube bajan a unas 2 por pregunta y las consultas a los documentos y a la base de datos se procesan en local. Además, los especialistas devuelven texto normal, así que el `.text` solo hace falta donde se lee la respuesta del orquestador.
 
 ## 📁 Estructura
 
 ```
 Orquestador-Asistente-empleados/
-├── app.py              # los 3 especialistas, el orquestador y el chat
+├── app.py              # los 3 especialistas, el orquestador y el chat de terminal
+├── api.py              # API con FastAPI: POST /chat, que llama al orquestador
 ├── indexar.py          # documentos/ → Chroma (colección "normativa")
 ├── crear_db.py         # crea empresa.db con empleados, vacaciones y tickets de ejemplo
 ├── documentos/         # normativa interna de la empresa ficticia
-│   ├── vacaciones_y_permisos.txt
-│   ├── teletrabajo.txt
-│   ├── gastos_y_viajes.txt
-│   ├── soporte_it.txt
-│   └── onboarding.txt
+├── frontend/           # web en Angular 21
+│   ├── src/app/interfaces/chat.ts      # tipos de la API (espejo de los modelos de Pydantic)
+│   ├── src/app/services/chat.ts        # llama a POST /chat
+│   ├── src/app/components/chat/        # la pantalla del chat
+│   └── Dockerfile      # compila Angular y lo sirve con Nginx
+├── Dockerfile          # imagen del backend (Python + FastAPI)
+├── docker-compose.yml  # arranca el backend y el frontend juntos
 ├── requirements.txt
 └── .gitignore          # excluye .env, .venv/, __pycache__/ y base_chroma/
 ```
@@ -97,10 +111,12 @@ Orquestador-Asistente-empleados/
 
 ### 1. Requisitos
 - Python 3.13
-- [Ollama](https://ollama.com/) instalado y abierto, con el modelo de embeddings:
+- [Ollama](https://ollama.com/) instalado y abierto, con el modelo de los especialistas y el de embeddings:
 ```bash
+ollama pull qwen2.5:7b
 ollama pull embeddinggemma
 ```
+- Para la web: [Docker Desktop](https://www.docker.com/products/docker-desktop/), o bien Node.js y Angular CLI si se arranca sin Docker.
 - Una clave de API de Gemini, gratuita en [Google AI Studio](https://aistudio.google.com/).
 
 ### 2. Instalar
@@ -125,10 +141,33 @@ python crear_db.py
 `crear_db.py` inserta los datos de ejemplo cada vez que se ejecuta: si quieres repetirlo, borra antes `empresa.db`.
 
 ### 5. Hablar con el asistente
+
+**Opción A: la web con Docker (recomendada).** Con Docker Desktop y Ollama abiertos:
+```bash
+docker compose up --build
+```
+Abre **http://localhost:4200**. La primera vez tarda unos minutos en construir las imágenes. Para pararlo: `docker compose down`.
+
+El contenedor del backend llega a Ollama en `host.docker.internal:11434`, recibe la clave desde el `.env` y usa `empresa.db` y `base_chroma` de tu carpeta como volúmenes, así que los cambios se guardan.
+
+**Opción B: la web sin Docker**, con dos terminales:
+```bash
+uvicorn api:api --reload
+```
+```bash
+cd frontend
+npm install --legacy-peer-deps
+ng serve
+```
+`--legacy-peer-deps` evita un fallo de npm 10 al resolver las dependencias de los tests de Angular 21.
+
+**Opción C: la terminal.**
 ```bash
 python app.py
 ```
 Te preguntará tu nombre. Los empleados de ejemplo son **Lucía Gómez**, **Pablo Serrano**, **Elena Martín** y **Javier Ortega** (escríbelos con sus tildes). Escribe `salir` para terminar.
+
+La web es una demo sin login: siempre habla como **Lucía Gómez**. El empleado lo fija el servidor, no el navegador, así que nadie puede cambiarlo desde el navegador.
 
 ## 💬 Ejemplo de conversación
 
@@ -167,12 +206,14 @@ Queda pendiente de aprobación por tu responsable.
 ## 🔮 Próximos pasos
 
 - [x] 💻 **Agente de tickets (IT)**: abrir y consultar incidencias
-- [ ] **Modelo híbrido**: Gemini solo en el orquestador y `qwen2.5:7b` en local para los especialistas
+- [x] **Modelo híbrido**: Gemini solo en el orquestador y `qwen2.5:7b` en local para los especialistas
+- [x] **Web** con Angular y FastAPI, y **Docker Compose**
+- [ ] **Pruebas automáticas** del orquestador: lanzar una batería de preguntas y medir a qué especialista llama y si los datos son correctos
+- [ ] Login en la web para varios empleados
 - [ ] Comparar con un modelo local más grande (`qwen2.5:14b`) para no depender de la nube
 - [ ] Festivos en el cálculo de días laborables
 - [ ] Memoria persistente (checkpointer en SQLite)
-- [ ] API con FastAPI e interfaz con Streamlit
 
 ## 🛠️ Tecnologías
 
-Python · LangChain · LangGraph · Gemini · Ollama (embeddinggemma) · Chroma · SQLite · Pydantic
+Python · LangChain · LangGraph · Gemini · Ollama (qwen2.5:7b, embeddinggemma) · Chroma · SQLite · Pydantic · FastAPI · Angular 21 · Docker · Nginx

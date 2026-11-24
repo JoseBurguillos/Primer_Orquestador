@@ -1,0 +1,16 @@
+# Entorno virtual: el contenedor instala sus propias librerías
+.venv/
+__pycache__/
+
+# El frontend tiene su propio Dockerfile
+frontend/
+
+# La clave de la API NUNCA va dentro de la imagen: se pasa al arrancar
+.env
+
+# Los datos van como volúmenes, para que no se pierdan al parar el contenedor
+base_chroma/
+empresa.db
+
+# Git no hace falta dentro de la imagen
+.git/

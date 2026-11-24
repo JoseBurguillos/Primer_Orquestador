@@ -6,6 +6,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import OllamaEmbeddings                       # el modelo que piensa + el de embeddings
 from langchain_chroma import Chroma                                 # base vectorial (normativa)
 from langchain_ollama import OllamaEmbeddings                       # el modelo que piensa + el de embeddings
+from langchain_ollama import ChatOllama
 from dotenv import load_dotenv
 
 from langgraph.graph import StateGraph, START, END, MessagesState   # el grafo
@@ -16,7 +17,9 @@ from datetime import date, timedelta
 
 load_dotenv()
 
-modelo = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0)
+modelo_orquestador = ChatGoogleGenerativeAI(model="gemini-3.5-flash-lite", temperature=0)
+
+modelo= ChatOllama(model="qwen2.5:7b", temperature=0)
 
 embeddings = OllamaEmbeddings(model="embeddinggemma") 
 
@@ -444,11 +447,11 @@ A quién consultar (esto NO es lo que tienes que escribir: es la herramienta que
 - "Sí" justo después de que IT haya preguntado "¿Lo abro?" → llamar a preguntar_tickets con "Sí, ábrelo"
 """
 herramientas_orquestador=[preguntar_normativa,preguntar_rrhh,preguntar_tickets]
-modelo_orquestador=modelo.bind_tools(herramientas_orquestador)
+modelo_orquesta=modelo_orquestador.bind_tools(herramientas_orquestador)
 
 def nodo_orquestador(state:MessagesState):
     sistema = f"{PROMPT_ORQUESTADOR}\nHoy es {date.today()}."
-    respuesta=modelo_orquestador.invoke(
+    respuesta=modelo_orquesta.invoke(
         [SystemMessage(sistema)]+state["messages"]
     )
     return {"messages":[respuesta]}

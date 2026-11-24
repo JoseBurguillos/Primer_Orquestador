@@ -1,0 +1,30 @@
+<div class="chat">
+  <h1>Asistente de Nubaria Tech</h1>
+
+  <!-- 1. La conversación -->
+  <div class="mensajes">
+    @for (mensaje of mensajes(); track $index) { <!--recorremos mensajes -->
+      <div class="mensaje" [class.empleado]="mensaje.autor === 'empleado'"
+                           [class.asistente]="mensaje.autor === 'asistente'">
+        <p>{{ mensaje.texto }}</p> <!-- texo del mensaje -->
+
+        @if (mensaje.especialistas?.length) {
+          <small class="especialistas">
+            Consultado: {{ mensaje.especialistas?.join(',') }}
+          </small>
+        }
+      </div>
+    }
+
+    <!-- 2. El aviso mientras espera -->
+    @if (cargando()) {
+      <div class="mensaje asistente pensando">Pensando...</div>
+    }
+  </div>
+
+  <!-- 3. La caja de texto -->
+  <form class="entrada" (ngSubmit)="enviar()">
+    <input name="texto" [(ngModel)]="texto" placeholder="Escribe tu pregunta..." autocomplete="off" />
+    <button type="submit" [disabled]="cargando()">Enviar</button>
+  </form>
+</div>

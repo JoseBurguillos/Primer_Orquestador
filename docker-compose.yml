@@ -1,0 +1,19 @@
+services:
+  backend:
+    build: .                          # usa el Dockerfile de esta carpeta
+    ports:
+      - "8000:8000"                   # puerto de tu PC : puerto del contenedor
+    env_file:
+      - .env                          # la clave de Gemini, sin meterla en la imagen
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434   # Ollama está en tu PC, no en el contenedor
+    volumes:
+      - ./base_chroma:/app/base_chroma   # la normativa indexada
+      - ./empresa.db:/app/empresa.db     # la base de datos
+
+  frontend:
+    build: ./frontend                 # usa el Dockerfile de la carpeta frontend
+    ports:
+      - "4200:80"                     # en tu PC, localhost:4200 → Nginx (puerto 80 del contenedor)
+    depends_on:
+      - backend                       # arranca después del backend
