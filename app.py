@@ -16,7 +16,7 @@ from datetime import date, timedelta
 
 load_dotenv()
 
-modelo = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+modelo = ChatGoogleGenerativeAI(model="gemini-3.5-flash-lite", temperature=0)
 
 embeddings = OllamaEmbeddings(model="embeddinggemma") 
 
@@ -256,6 +256,113 @@ def identificar_empleado(nombre: str):
         return None
     return fila[0]
 
+
+@tool
+def consultar_incidencia(config:RunnableConfig)->str:
+    """Consulta los tickets de soporte informático del empleado que está hablando.
+    Úsala cuando el empleado pregunte por sus incidencias o tickets: cuáles tiene abiertos,
+    cómo va uno en concreto o si ya se ha resuelto.
+    Devuelve la lista de sus tickets con el número (por ejemplo, T001), el título,
+    la prioridad, el estado (abierto, en curso o resuelto) y la fecha."""
+    identificador=config["configurable"]["empleado_id"]
+    
+    conexion=sqlite3.connect("empresa.db")
+    cursor=conexion.cursor()
+    cursor.execute("SELECT id,titulo,prioridad,estado,fecha from tickets WHERE empleado_id=?",
+                   (identificador,))
+    filas=cursor.fetchall()
+    conexion.close()
+    
+    if not filas:
+        return "No tienes tickets todavia"
+    
+    lineas=[]
+    
+    for id_ticket,titulo,prioridad,estado,fecha in filas:
+        lineas.append(f"T{id_ticket}-{titulo}-prioridad:{prioridad}-{estado}-{fecha}")
+        
+    return "\n".join(lineas)
+
+
+
+@tool
+def crear_incidencia(titulo: str|None, descripcion: str|None, prioridad: str|None, config: RunnableConfig)->str:
+    """Abre un ticket de soporte informático para el empleado que está hablando.
+    Úsala cuando el empleado tenga un problema informático (el portátil, la VPN, una contraseña,
+    un programa...) y ya haya explicado qué le pasa.
+    - titulo: resumen corto del problema (por ejemplo, "No funciona la VPN").
+    - descripcion: qué le pasa, explicado con las palabras del empleado.
+    - prioridad: una de estas cuatro, en minúsculas:
+        "critica": impide trabajar a varias personas, afecta a clientes, o se ha perdido o robado un equipo.
+        "alta": impide trabajar al empleado.
+        "media": molesta, pero puede seguir trabajando.
+        "baja": peticiones y consultas, como instalar un programa.
+    Devuelve el número del ticket creado o el motivo por el que no se ha podido crear."""
+    
+    identificador=config["configurable"]["empleado_id"]
+    fecha = date.today().isoformat()
+    
+    if titulo is None:
+        return "Titulo esta vacio"
+    if descripcion is None:
+        return "Descripcion esta vacio"    
+    if prioridad is None:
+        return "Prioridad esta vacio"
+    if prioridad not in ["critica", "alta", "media", "baja"]:
+        return "No se ha creado el ticket: la prioridad tiene que ser critica, alta, media o baja."        
+    
+    conexion=sqlite3.connect("empresa.db")
+    cursor=conexion.cursor()
+    
+    cursor.execute("INSERT INTO tickets (empleado_id,titulo, descripcion,prioridad,fecha) VALUES(?,?,?,?,?)",
+                   (identificador,titulo,descripcion,prioridad,fecha,))
+    
+    conexion.commit()
+    nuevo_id = cursor.lastrowid          # el id que ha puesto SQLite (por ejemplo, 4)
+    conexion.close()
+    
+    return f"Ticket T{nuevo_id:03d} creado con prioridad {prioridad}. Estado: abierto."
+
+PROMPT_INCIDENCIAS = """Eres el asistente de soporte informático (IT) de Nubaria Tech. Atiendes al empleado que está hablando contigo sobre sus incidencias informáticas. Respondes siempre en español, de tú, de forma clara y breve.
+
+Reglas:
+- Para saber qué tickets tiene el empleado y cómo van, usa la herramienta consultar_incidencia. No respondas sobre sus tickets sin haberla usado.
+- Para abrir un ticket, usa la herramienta crear_incidencia. Necesitas saber qué le pasa al empleado. Si no lo ha explicado, pregúntaselo. No te lo inventes.
+- Elige tú la prioridad según el problema: "critica" si impide trabajar a varias personas, afecta a clientes o se ha perdido o robado un equipo; "alta" si le impide trabajar a él; "media" si molesta pero puede seguir trabajando; "baja" para peticiones y consultas.
+- Antes de usar crear_incidencia, resume al empleado el título y la prioridad del ticket y pregúntale si lo abres. Úsala solo cuando confirme (por ejemplo, "sí", "vale").
+- Nunca digas que has abierto un ticket si no has usado crear_incidencia y te ha devuelto su número.
+- Cuando abras un ticket, dale al empleado su número (por ejemplo, T004).
+- Solo respondes sobre los tickets del empleado. Si te preguntan por normas de la empresa (plazos, contraseñas, qué hacer si pierdes el portátil...), NO respondas a esa parte: di "Esa parte no es de mi área, la responde el especialista en normativa".
+- Las herramientas ya saben quién es el empleado: no le pidas su nombre ni su número.
+- No inventes datos: usa solo lo que te devuelvan las herramientas.
+
+Ejemplo de cómo actuar:
+Empleado: "No me funciona la impresora de la oficina"
+Tú, SIN usar ninguna herramienta, respondes: "Voy a abrir un ticket 'No funciona la impresora' con prioridad media. ¿Lo abro?"
+Empleado: "Sí"
+Tú llamas a la herramienta crear_incidencia con titulo="No funciona la impresora", descripcion="No me funciona la impresora de la oficina", prioridad="media".
+"""
+
+herramientas_tickets=[consultar_incidencia,crear_incidencia]
+modelo_ticket=modelo.bind_tools(herramientas_tickets)
+
+def agente_tickets(state:MessagesState):
+    sistema = f"{PROMPT_INCIDENCIAS}"
+    respuesta=modelo_ticket.invoke(
+        [SystemMessage(sistema)]+state["messages"]
+    )
+    return {"messages":[respuesta]}
+
+grafo_tickets=StateGraph(MessagesState)
+grafo_tickets.add_node("agente",agente_tickets)
+grafo_tickets.add_node("tools",ToolNode(herramientas_tickets))
+
+grafo_tickets.add_edge(START, "agente")
+grafo_tickets.add_conditional_edges("agente",decidir)
+grafo_tickets.add_edge("tools", "agente")
+
+app_ticket=grafo_tickets.compile(MemorySaver())
+
 # ==================== ORQUESTADOR ====================
 
 @tool
@@ -276,8 +383,6 @@ def preguntar_normativa(pregunta:str)->str:
     return resultado["messages"][-1].content
 
 
-
-
 @tool
 def preguntar_rrhh(peticion: str, config: RunnableConfig) -> str:
     """Consulta al especialista de Recursos Humanos sobre las vacaciones del empleado que está hablando.
@@ -294,6 +399,22 @@ def preguntar_rrhh(peticion: str, config: RunnableConfig) -> str:
     resultado=app_rrhh.invoke({"messages":[HumanMessage(peticion)]},config=config_rrhh)
     return resultado["messages"][-1].content
 
+@tool
+def preguntar_tickets(peticion: str, config: RunnableConfig) -> str:
+    """Consulta al especialista de soporte informático (IT) sobre las incidencias del empleado que está hablando.
+    Úsala para abrir un ticket cuando el empleado tenga un problema informático (portátil, VPN, contraseña,
+    programas...), para saber cómo van sus tickets y para confirmar un ticket que el especialista haya
+    preparado (cuando el empleado responde "sí", "vale"...).
+    NO responde dudas sobre las normas de la empresa: para eso, usa preguntar_normativa.
+    Recibe lo que ha dicho el empleado, completo y en español, y devuelve la respuesta del especialista."""
+
+    config_tickets = {"configurable": {
+        "thread_id": config["configurable"]["thread_id"] + "-tickets",
+        "empleado_id": config["configurable"]["empleado_id"],
+    }}
+
+    resultado = app_ticket.invoke({"messages": [HumanMessage(peticion)]}, config=config_tickets)
+    return resultado["messages"][-1].content
 
 PROMPT_ORQUESTADOR = """Eres el asistente interno de Nubaria Tech. Atiendes a los empleados en español, de tú, de forma clara y breve.
 No respondes con lo que tú sabes: pasas cada petición al especialista que corresponde y le das al empleado su respuesta.
@@ -301,7 +422,7 @@ No respondes con lo que tú sabes: pasas cada petición al especialista que corr
 Especialistas:
 - preguntar_normativa: dudas sobre las normas de la empresa, iguales para todos (vacaciones, permisos, teletrabajo, gastos y viajes, informática, oficina, beneficios).
 - preguntar_rrhh: los datos y gestiones de vacaciones del empleado (cuántos días le quedan, pedir vacaciones, confirmar una solicitud).
-
+- preguntar_tickets: las incidencias informáticas del empleado (abrir un ticket, saber cómo van sus tickets, confirmar un ticket).
 Reglas:
 - Para cualquier pregunta sobre la empresa o sobre los datos del empleado, usa SIEMPRE al especialista. No respondas de memoria.
 - Pásale al especialista lo que ha dicho el empleado, completo, con las fechas y los datos que haya dado.
@@ -317,9 +438,12 @@ A quién consultar (esto NO es lo que tienes que escribir: es la herramienta que
 - "Sí" justo después de que RRHH haya preguntado "¿Lo confirmo?" → llamar a preguntar_rrhh con "Sí, lo confirmo"
 - Nunca escribas al empleado el nombre de una herramienta: llámala.
 - Si un especialista dice que una parte no es de su área, pregunta esa parte al otro especialista antes de responder.
-
+- "No me funciona la VPN" → llamar a la herramienta preguntar_tickets
+- "¿Cómo va mi ticket?" → llamar a la herramienta preguntar_tickets
+- "He perdido el portátil, ¿qué tengo que hacer?" → llamar a preguntar_normativa (qué dice la norma) y también a preguntar_tickets (abrir el ticket)
+- "Sí" justo después de que IT haya preguntado "¿Lo abro?" → llamar a preguntar_tickets con "Sí, ábrelo"
 """
-herramientas_orquestador=[preguntar_normativa,preguntar_rrhh]
+herramientas_orquestador=[preguntar_normativa,preguntar_rrhh,preguntar_tickets]
 modelo_orquestador=modelo.bind_tools(herramientas_orquestador)
 
 def nodo_orquestador(state:MessagesState):
@@ -340,6 +464,8 @@ grafo_orquestador.add_edge("tools","node_orquestador")
 
 app_orquestador = grafo_orquestador.compile(checkpointer=MemorySaver())
 
+
+
 if __name__ == "__main__":
     nombre = input("¿Cómo te llamas? ")
     empleado_id = identificar_empleado(nombre)
@@ -356,16 +482,8 @@ if __name__ == "__main__":
         if pregunta == "salir":
             break
         resultado = app_orquestador.invoke({"messages": [HumanMessage(pregunta)]}, config=config)
-        for m in resultado["messages"][-4:]:
+        for m in resultado["messages"][-6:]:
             if getattr(m, "tool_calls", None):
                 for llamada in m.tool_calls:
-                     print("   🎩 →", llamada["name"], ":", llamada["args"])
-        
+                    print("", llamada["name"], ":", llamada["args"])
         print("Asistente:", resultado["messages"][-1].content)
-
-
-
-
-
-
-
